@@ -37,3 +37,6 @@ logs/
 
 # Claude Code harness state (not project content)
 .claude/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
