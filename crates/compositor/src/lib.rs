@@ -7,7 +7,9 @@
 //! Este crate no importa `tauri`.
 
 pub mod camera_path;
+pub mod decode;
 pub mod render;
 
 pub use camera_path::camera_rect_at;
+pub use decode::{DecodeError, RawFrameReader};
 pub use render::{Compositor, CompositorError, PIXEL_FORMAT};

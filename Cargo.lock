@@ -956,6 +956,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "exporter"
+version = "0.1.0"
+dependencies = [
+ "compositor",
+ "project",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
