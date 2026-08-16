@@ -2,6 +2,56 @@
 
 Este archivo le da contexto a Claude Code (u otro agente de IA) cuando trabaja en este repositorio. Léelo completo antes de tocar código. Para el _por qué_ de las decisiones de arquitectura, ver `docs/ARQUITECTURA.md`. Para el orden de implementación, ver `docs/PROMPT_AGENTE_DEV.md`.
 
+## Reglas Core — Ahorro Máximo de Tokens & Eficiencia Absoluta
+
+### 1. Contexto y lectura
+
+- Antes de escribir código: `Glob`/`Grep` para ubicar archivos, leer dependencias (`Cargo.toml`, `package.json`), entender la arquitectura existente. Si la instrucción es ambigua, 1 sola pregunta directa — no asumir.
+- Leer sólo lo estrictamente necesario (`offset`/`limit` en `Read` en vez de archivos completos).
+- Si la ruta exacta ya se conoce, `Read` directo — evitar cadenas innecesarias `Glob → Grep → Read`.
+- No releer archivos ya leídos en la sesión salvo que hayan sido modificados desde entonces.
+- Paralelizar tool calls siempre que sean independientes entre sí.
+- Antes de usar una API de un crate/paquete de versión reciente (`wgpu`, `windows-capture`, `rdev`, `tauri`, ecosistema npm de `apps/desktop`), verificar la firma real en el source descargado (`cargo add` + inspeccionar `~/.cargo/registry/src/`) en vez de confiar en memoria de entrenamiento — este stack tiene versiones más nuevas que el training data y rompe API sin aviso (ya pasó con `wgpu` 30 en esta sesión).
+
+### 2. Edición de código
+
+- `Edit` sobre `Write` en archivos existentes. `Write` sólo si se refactoriza más del 80% del archivo.
+- Cambiar sólo lo necesario — no reformatear ni "limpiar" alrededor del cambio si no fue pedido.
+- Imitar el estilo del archivo (naming, indentación, librerías, patrones). No introducir framework o patrón nuevo sin permiso explícito.
+- Soluciones minimalistas: lo mínimo indispensable, cero abstracciones prematuras — 3 líneas repetidas es preferible a una abstracción prematura.
+- Antes de instalar un paquete nuevo, revisar `Cargo.toml`/`package.json` para ver si ya existe algo que cumpla esa función.
+
+### 3. Comunicación (cero fluff)
+
+- Respuestas de 1 a 3 oraciones máximo. Sin preámbulos, sin resumen final tipo recap.
+- Cero charla aduladora o robótica ("Excelente pregunta", "Entendido", "Aquí tienes").
+- No imprimir en el texto fragmentos de código ya aplicados vía `Edit`/`Write` — el usuario ve el diff en la terminal.
+- No narrar el plan antes de ejecutar — ejecutar las tool calls directamente.
+- No pelear con el usuario: si pide algo de una manera específica, hacerlo así, salvo riesgo crítico de seguridad o pérdida de datos (mencionarlo en 1 oración y proceder igual).
+
+### 4. Ejecución y validación (bash)
+
+- Después de modificar código, correr autónomamente linter/compilador/tests relevantes (`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `pnpm exec tsc -b --noEmit`, `pnpm exec vite build`) antes de declarar éxito. No afirmar éxito sin evidencia en consola.
+- Si un comando falla, leer el error, arreglarlo y reintentar sin detenerse a avisar — sólo parar si el error persiste tras 3 intentos lógicos. Esto no aplica a acciones destructivas o irreversibles (fuera de esta regla — siguen requiriendo confirmación).
+- Bash no interactivo: usar siempre flags de confirmación automática; procesos largos (`cargo build` en frío, `pnpm tauri dev`, grabaciones de prueba) en background.
+- Después de tocar `crates/capture` o `crates/input-tracker`, el test real que graba pantalla/loguea mouse queda `#[ignore]` a propósito (side effect real sobre la máquina) — correrlo a mano si el cambio lo justifica, no asumir que `cargo test` normal ya lo cubrió.
+
+### 5. Uso de agentes/sub-agentes
+
+- No usar `Agent`/`Task` cuando `Glob`+`Grep` alcanza. Reservar sub-agentes para tareas masivas o búsquedas exploratorias muy complejas.
+
+### 6. Contexto entre sesiones (`UPDATES.md`)
+
+- Al iniciar cualquier conversación nueva sobre este proyecto: revisar `UPDATES.md` (mismo directorio que este archivo) para confirmar contexto previo — cambios recientes, pendientes abiertos y estado de la última sesión, si existe.
+- `UPDATES.md` es de escritura explícita únicamente: solo se crea, escribe o actualiza cuando el usuario lo pide directamente. Nunca sobreescribir ni modificar su contenido de forma proactiva o "de paso" al terminar otra tarea.
+- No sobreescribir ni modificar entradas existentes sin ese pedido explícito, aunque la sesión actual agregue contexto relevante.
+- La retención de `UPDATES.md` se basa en **días**, no en cantidad de sesiones: mantener siempre las últimas **3 secciones de día** en el archivo. Al agregar la sección de un nuevo día que supere ese total, eliminar la sección del día más antiguo completa — nunca por antigüedad de fecha fija, solo por cantidad de días.
+- **CADA SECCIÓN** representa un único día. Dentro de una sección puede haber una **cantidad ilimitada de sesiones** — nunca truncar ni fusionar sesiones de un mismo día por volumen; toda sesión trabajada en ese día debe quedar documentada.
+- Cada sesión dentro de una sección (un día) lleva su propio **título corto** describiendo qué se trabajó, y se ordenan cronológicamente de la más antigua a la más reciente.
+- Las sesiones dentro de una misma sección de día se separan entre sí con una línea horizontal `---`.
+
+---
+
 ## Qué es este proyecto
 
 App de escritorio de screen recording con zoom automático (estilo Screen Studio), Windows primero, macOS después. Uso personal por ahora, sin backend, sin licensing, 100% local.
