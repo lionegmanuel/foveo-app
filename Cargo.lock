@@ -243,6 +243,7 @@ dependencies = [
 name = "capture"
 version = "0.1.0"
 dependencies = [
+ "thiserror 2.0.20",
  "windows-capture",
 ]
 
@@ -1621,6 +1622,7 @@ name = "input-tracker"
 version = "0.1.0"
 dependencies = [
  "rdev",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

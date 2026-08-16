@@ -7,3 +7,4 @@ publish.workspace = true
 
 [dependencies]
 rdev = "0.5.3"
+thiserror = "2.0.20"

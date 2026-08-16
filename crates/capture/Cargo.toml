@@ -6,4 +6,5 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+thiserror = "2.0.20"
 windows-capture = "2.0.1"
