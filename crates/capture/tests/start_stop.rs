@@ -19,7 +19,7 @@ fn start_then_stop_produces_a_playable_take() {
     let output_path = dir.join("take.mp4");
 
     let capturer = WindowsScreenCapturer;
-    let handle = capturer.start_recording(&output_path).expect("start_recording fallo");
+    let handle = capturer.start_recording(&output_path, None).expect("start_recording fallo");
 
     thread::sleep(Duration::from_secs(2));
 
@@ -37,4 +37,18 @@ fn start_then_stop_produces_a_playable_take() {
     assert!(metadata.len() > 0, "el mp4 no deberia estar vacio");
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn list_monitors_returns_at_least_one_real_monitor() {
+    // Solo consulta geometria, no graba ni escribe nada: no hace falta
+    // `#[ignore]`, corre en cada `cargo test` normal.
+    let capturer = WindowsScreenCapturer;
+    let monitors = capturer.list_monitors().expect("list_monitors fallo");
+
+    assert!(!monitors.is_empty(), "esta maquina deberia tener al menos un monitor");
+    for m in &monitors {
+        assert!(m.index >= 1);
+        assert!(m.width > 0 && m.height > 0, "geometria invalida para {}: {}x{}", m.name, m.width, m.height);
+    }
 }

@@ -51,14 +51,32 @@ pub struct RawTakeInfo {
     pub recording_stopped_wall_ms: u128,
 }
 
+/// Metadata minima de un monitor para el selector de fuente de la UI (ver
+/// ARQUITECTURA.md 4.1: "Grabar pantalla completa o un monitor especifico").
+#[derive(Debug, Clone)]
+pub struct MonitorInfo {
+    /// Indice 1-based estable (mismo que espera `start_recording`), no un
+    /// handle de OS — sirve para mostrarlo en un `<select>` y volver a
+    /// pasarlo tal cual.
+    pub index: usize,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// Abstraccion de plataforma para grabar pantalla completa a un archivo.
 pub trait ScreenCapturer {
     type Handle: RecordingHandle;
 
-    /// Arranca a grabar el monitor primario en `output_path` y devuelve de
-    /// inmediato un handle para pararla despues; nunca bloquea el hilo que
-    /// llama (ver CLAUDE.md regla 1: nada de video pesado en el hilo de UI).
-    fn start_recording(&self, output_path: &Path) -> Result<Self::Handle, CaptureError>;
+    /// Lista los monitores disponibles, para el selector de fuente de la UI.
+    fn list_monitors(&self) -> Result<Vec<MonitorInfo>, CaptureError>;
+
+    /// Arranca a grabar en `output_path` y devuelve de inmediato un handle
+    /// para pararla despues; nunca bloquea el hilo que llama (ver CLAUDE.md
+    /// regla 1: nada de video pesado en el hilo de UI). `monitor_index` usa
+    /// los mismos indices que devuelve `list_monitors`; `None` graba el
+    /// monitor primario.
+    fn start_recording(&self, output_path: &Path, monitor_index: Option<usize>) -> Result<Self::Handle, CaptureError>;
 }
 
 /// Handle de una grabacion en curso. Consumirlo con `stop()` bloquea hasta
@@ -70,17 +88,40 @@ pub trait RecordingHandle {
 }
 
 /// Implementacion Windows via Windows.Graphics.Capture (crate
-/// `windows-capture`). No requiere ningun picker/dialogo: graba siempre el
-/// monitor primario. El picker de fuente (monitor/ventana, con manejo
-/// explicito de cancelacion — ver ARQUITECTURA.md seccion 4) se conecta desde
-/// `apps/desktop/src-tauri` cuando la UI lo exponga.
+/// `windows-capture`). Selecciona monitor por indice (`list_monitors`/
+/// `start_recording`), sin picker/dialogo interactivo. El picker de fuente
+/// nativo (con manejo explicito de cancelacion — ver ARQUITECTURA.md seccion
+/// 4) queda como posible mejora de UX, no bloquea la seleccion de monitor.
 pub struct WindowsScreenCapturer;
 
 impl ScreenCapturer for WindowsScreenCapturer {
     type Handle = WindowsRecordingHandle;
 
-    fn start_recording(&self, output_path: &Path) -> Result<Self::Handle, CaptureError> {
-        let monitor = Monitor::primary().map_err(|e| CaptureError::NoPrimaryMonitor(e.to_string()))?;
+    fn list_monitors(&self) -> Result<Vec<MonitorInfo>, CaptureError> {
+        let monitors = Monitor::enumerate().map_err(|e| CaptureError::MonitorInfo(e.to_string()))?;
+        monitors
+            .into_iter()
+            .enumerate()
+            .map(|(i, m)| {
+                Ok(MonitorInfo {
+                    index: i + 1,
+                    name: m.name().unwrap_or_else(|_| format!("Monitor {}", i + 1)),
+                    width: m.width().map_err(|e| CaptureError::MonitorInfo(e.to_string()))?,
+                    height: m.height().map_err(|e| CaptureError::MonitorInfo(e.to_string()))?,
+                })
+            })
+            .collect()
+    }
+
+    fn start_recording(
+        &self,
+        output_path: &Path,
+        monitor_index: Option<usize>,
+    ) -> Result<Self::Handle, CaptureError> {
+        let monitor = match monitor_index {
+            Some(index) => Monitor::from_index(index).map_err(|e| CaptureError::MonitorInfo(e.to_string()))?,
+            None => Monitor::primary().map_err(|e| CaptureError::NoPrimaryMonitor(e.to_string()))?,
+        };
         let width = monitor.width().map_err(|e| CaptureError::MonitorInfo(e.to_string()))?;
         let height = monitor.height().map_err(|e| CaptureError::MonitorInfo(e.to_string()))?;
         let fps = monitor.refresh_rate().map_err(|e| CaptureError::MonitorInfo(e.to_string()))?;

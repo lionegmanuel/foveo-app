@@ -6,9 +6,14 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+capture = { version = "0.1.0", path = "../../../crates/capture" }
+exporter = { version = "0.1.0", path = "../../../crates/exporter" }
+input-tracker = { version = "0.1.0", path = "../../../crates/input-tracker" }
+project = { version = "0.1.0", path = "../../../crates/project" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tauri = { version = "2.11.5", features = ["devtools"] }
+zoom-engine = { version = "0.1.0", path = "../../../crates/zoom-engine" }
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = ["codegen"] }
