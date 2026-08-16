@@ -1,0 +1,39 @@
+# Rust
+/target/
+**/target/
+Cargo.lock.bak
+
+# Node / pnpm
+node_modules/
+apps/desktop/dist/
+apps/desktop/src-tauri/target/
+
+# Tauri
+apps/desktop/src-tauri/gen/
+
+# ffmpeg sidecar binaries (downloaded at build time, not versioned)
+sidecars/ffmpeg/**
+!sidecars/ffmpeg/.gitkeep
+
+# Env
+.env
+.env.local
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+Thumbs.db
+.DS_Store
+
+# Spike/scratch outputs (Fase 0)
+/spikes-output/
+*.log
+
+# Logs
+logs/
+*.pid
+
+# Claude Code harness state (not project content)
+.claude/

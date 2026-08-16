@@ -1,0 +1,17 @@
+{
+  "name": "screenzoom",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Screen recorder con zoom automatico estilo Screen Studio (Windows primero, macOS despues)",
+  "scripts": {
+    "tauri": "pnpm --filter screenzoom-desktop tauri",
+    "dev": "pnpm --filter screenzoom-desktop tauri dev",
+    "build": "pnpm --filter screenzoom-desktop tauri build",
+    "lint": "pnpm --filter screenzoom-desktop lint",
+    "format": "pnpm --filter screenzoom-desktop format"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.22.0"
+}
