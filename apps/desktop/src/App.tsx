@@ -1,6 +1,24 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { exportProject, listMonitors, startRecording, stopRecording, type MonitorInfo } from "./lib/commands";
+import {
+  deleteKeyframe,
+  exportProject,
+  getProject,
+  listMonitors,
+  renderPreviewFrame,
+  startRecording,
+  stopRecording,
+  updateKeyframe,
+  updateStyle,
+  type Easing,
+  type MonitorInfo,
+  type Project,
+  type Rect,
+  type ZoomKeyframe,
+} from "./lib/commands";
+import { TimelineOverlay } from "./components/TimelineOverlay";
+import { KeyframeTrack } from "./components/KeyframeTrack";
+import { StylePanel } from "./components/StylePanel";
 
 type Status =
   | { kind: "idle" }
@@ -10,10 +28,19 @@ type Status =
   | { kind: "exported"; outputPath: string }
   | { kind: "error"; message: string };
 
+const PREVIEW_WIDTH = 854;
+const PREVIEW_DEBOUNCE_MS = 100;
+
 function App() {
   const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
   const [selectedMonitor, setSelectedMonitor] = useState<number | undefined>(undefined);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+
+  const [project, setProject] = useState<Project | null>(null);
+  const [selectedKeyframeId, setSelectedKeyframeId] = useState<string | null>(null);
+  const [scrubMs, setScrubMs] = useState(0);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const previewDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     listMonitors()
@@ -41,6 +68,42 @@ function App() {
       void unlistenError.then((unlisten) => unlisten());
     };
   }, []);
+
+  // Carga el proyecto recien grabado apenas hay un projectPath disponible.
+  useEffect(() => {
+    if (status.kind !== "stopped") {
+      return;
+    }
+    getProject(status.projectPath)
+      .then((loaded) => {
+        setProject(loaded);
+        setSelectedKeyframeId(loaded.zoom_keyframes[0]?.id ?? null);
+        setScrubMs(0);
+      })
+      .catch((err: unknown) => setStatus({ kind: "error", message: String(err) }));
+  }, [status]);
+
+  // Re-renderiza el preview (debounced) cada vez que cambia el proyecto o el scrubber.
+  useEffect(() => {
+    if (status.kind !== "stopped" || !project) {
+      return;
+    }
+    if (previewDebounce.current) {
+      clearTimeout(previewDebounce.current);
+    }
+    previewDebounce.current = setTimeout(() => {
+      renderPreviewFrame(status.projectPath, scrubMs, PREVIEW_WIDTH)
+        .then(setPreviewSrc)
+        .catch((err: unknown) => setStatus({ kind: "error", message: String(err) }));
+    }, PREVIEW_DEBOUNCE_MS);
+
+    return () => {
+      if (previewDebounce.current) {
+        clearTimeout(previewDebounce.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project, scrubMs]);
 
   const handleRecordToggle = useCallback(async () => {
     try {
@@ -71,10 +134,66 @@ function App() {
     }
   }, [status]);
 
+  const selectedKeyframe = project?.zoom_keyframes.find((k) => k.id === selectedKeyframeId) ?? null;
+
+  const persistKeyframe = useCallback(
+    (keyframe: ZoomKeyframe) => {
+      if (status.kind !== "stopped") {
+        return;
+      }
+      setProject((current) => {
+        if (!current) return current;
+        const zoom_keyframes = current.zoom_keyframes.map((k) => (k.id === keyframe.id ? keyframe : k));
+        return { ...current, zoom_keyframes };
+      });
+      void updateKeyframe(status.projectPath, keyframe).catch((err: unknown) =>
+        setStatus({ kind: "error", message: String(err) }),
+      );
+    },
+    [status],
+  );
+
+  const handleRectChange = useCallback(
+    (rect: Rect) => {
+      if (!selectedKeyframe) return;
+      persistKeyframe({ ...selectedKeyframe, target_rect: rect });
+    },
+    [selectedKeyframe, persistKeyframe],
+  );
+
+  const handleEasingChange = useCallback(
+    (easing: Easing) => {
+      if (!selectedKeyframe) return;
+      persistKeyframe({ ...selectedKeyframe, easing });
+    },
+    [selectedKeyframe, persistKeyframe],
+  );
+
+  const handleDeleteKeyframe = useCallback(
+    (id: string) => {
+      if (status.kind !== "stopped") return;
+      setProject((current) =>
+        current ? { ...current, zoom_keyframes: current.zoom_keyframes.filter((k) => k.id !== id) } : current,
+      );
+      if (selectedKeyframeId === id) setSelectedKeyframeId(null);
+      void deleteKeyframe(status.projectPath, id).catch((err: unknown) => setStatus({ kind: "error", message: String(err) }));
+    },
+    [status, selectedKeyframeId],
+  );
+
+  const handleStyleChange = useCallback(
+    (style: Project["style"]) => {
+      if (status.kind !== "stopped") return;
+      setProject((current) => (current ? { ...current, style } : current));
+      void updateStyle(status.projectPath, style).catch((err: unknown) => setStatus({ kind: "error", message: String(err) }));
+    },
+    [status],
+  );
+
   const isRecording = status.kind === "recording";
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-neutral-950 p-8 text-neutral-100">
+    <main className="flex min-h-screen flex-col items-center gap-6 bg-neutral-950 p-8 text-neutral-100">
       <h1 className="text-xl font-semibold">screenzoom</h1>
 
       <label className="flex flex-col gap-1 text-sm text-neutral-400">
@@ -102,14 +221,48 @@ function App() {
         {isRecording ? "Detener grabacion" : "Grabar"}
       </button>
 
-      {status.kind === "stopped" && (
-        <button
-          type="button"
-          className="rounded-full bg-blue-600 px-6 py-3 font-medium text-white transition hover:bg-blue-500"
-          onClick={() => void handleExport()}
-        >
-          Exportar
-        </button>
+      {status.kind === "stopped" && project && (
+        <div className="flex w-full max-w-4xl flex-col gap-4">
+          <TimelineOverlay
+            previewSrc={previewSrc}
+            rect={selectedKeyframe?.target_rect ?? { x: 0, y: 0, w: 1, h: 1 }}
+            onRectChange={handleRectChange}
+          />
+
+          <input
+            type="range"
+            min={0}
+            max={project.raw_take.duration_ms}
+            step={16}
+            value={scrubMs}
+            onChange={(event) => setScrubMs(Number(event.target.value))}
+            className="w-full"
+          />
+
+          <KeyframeTrack
+            keyframes={project.zoom_keyframes}
+            durationMs={project.raw_take.duration_ms}
+            selectedId={selectedKeyframeId}
+            onSelect={setSelectedKeyframeId}
+            onChange={persistKeyframe}
+            onDelete={handleDeleteKeyframe}
+          />
+
+          <StylePanel
+            style={project.style}
+            onStyleChange={handleStyleChange}
+            selectedKeyframe={selectedKeyframe}
+            onEasingChange={handleEasingChange}
+          />
+
+          <button
+            type="button"
+            className="rounded-full bg-blue-600 px-6 py-3 font-medium text-white transition hover:bg-blue-500"
+            onClick={() => void handleExport()}
+          >
+            Exportar
+          </button>
+        </div>
       )}
 
       {status.kind === "exporting" && (
