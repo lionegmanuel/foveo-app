@@ -22,6 +22,12 @@ pub(crate) fn find_ffmpeg_binary() -> String {
     std::env::var("FFMPEG_BINARY_PATH").unwrap_or_else(|_| "ffmpeg".to_string())
 }
 
+/// Formatea `ms` como segundos con precision de milisegundos para el flag
+/// `-ss` de ffmpeg (ej. `1500` -> `"1.500"`).
+fn seek_arg(ms: u64) -> String {
+    format!("{}.{:03}", ms / 1000, ms % 1000)
+}
+
 /// Lee frames BGRA8 crudos de una toma grabada, uno a la vez, pipeando desde
 /// un proceso `ffmpeg -f rawvideo -pix_fmt bgra`.
 pub struct RawFrameReader {
@@ -37,6 +43,26 @@ impl RawFrameReader {
     pub fn spawn(input_path: &Path, width: u32, height: u32) -> Result<Self, DecodeError> {
         let mut child = Command::new(find_ffmpeg_binary())
             .args(["-v", "error", "-i"])
+            .arg(input_path)
+            .args(["-f", "rawvideo", "-pix_fmt", "bgra", "-"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+
+        let stdout = child.stdout.take().expect("stdout fue pedido como piped");
+        let frame_size = (width as usize) * (height as usize) * 4;
+
+        Ok(Self { child, stdout, frame_size })
+    }
+
+    /// Como `spawn`, pero arranca la decodificacion desde `seek_ms` en vez del
+    /// principio del archivo — usa el seek rapido de ffmpeg (`-ss` antes de
+    /// `-i`, por keyframes, no frame-exacto) para no tener que leer toda la
+    /// toma cruda solo para renderizar un frame de preview cerca del final.
+    pub fn spawn_seeked(input_path: &Path, width: u32, height: u32, seek_ms: u64) -> Result<Self, DecodeError> {
+        let mut child = Command::new(find_ffmpeg_binary())
+            .args(["-v", "error", "-ss", &seek_arg(seek_ms), "-i"])
             .arg(input_path)
             .args(["-f", "rawvideo", "-pix_fmt", "bgra", "-"])
             .stdin(Stdio::null())
@@ -74,5 +100,17 @@ impl Drop for RawFrameReader {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::seek_arg;
+
+    #[test]
+    fn seek_arg_formats_milliseconds_as_seconds_with_millisecond_precision() {
+        assert_eq!(seek_arg(0), "0.000");
+        assert_eq!(seek_arg(1_500), "1.500");
+        assert_eq!(seek_arg(12_345), "12.345");
     }
 }
