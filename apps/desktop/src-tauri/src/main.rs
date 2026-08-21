@@ -43,6 +43,12 @@ fn main() {
             commands::recording::start_recording,
             commands::recording::stop_recording,
             commands::export::export_project,
+            commands::preview::render_preview_frame,
+            commands::keyframes::get_project,
+            commands::keyframes::update_keyframe,
+            commands::keyframes::add_keyframe,
+            commands::keyframes::delete_keyframe,
+            commands::keyframes::update_style,
         ])
         .run(tauri::generate_context!())
         .expect("error corriendo la app de tauri");

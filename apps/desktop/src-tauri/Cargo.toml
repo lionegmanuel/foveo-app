@@ -6,9 +6,12 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+base64 = "0.23.1"
 capture = { version = "0.1.0", path = "../../../crates/capture" }
+compositor = { version = "0.1.0", path = "../../../crates/compositor" }
 exporter = { version = "0.1.0", path = "../../../crates/exporter" }
 input-tracker = { version = "0.1.0", path = "../../../crates/input-tracker" }
+png = "0.18.1"
 project = { version = "0.1.0", path = "../../../crates/project" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
