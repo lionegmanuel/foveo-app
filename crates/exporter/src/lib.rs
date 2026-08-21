@@ -10,7 +10,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 
-use compositor::{Compositor, RawFrameReader, camera_rect_at};
+use compositor::{Compositor, RawFrameReader, apply_style, camera_rect_at};
 use project::{ExportResolution, Project};
 
 #[derive(Debug, thiserror::Error)]
@@ -131,7 +131,8 @@ pub fn render_and_export(
         let crop_rect = camera_rect_at(&keyframes, t_ms);
 
         let composed = compositor.composite_frame(&frame, crop_rect)?;
-        exporter.write_frame(&composed)?;
+        let styled = apply_style(&composed, out_width, out_height, &project.style);
+        exporter.write_frame(&styled.bgra)?;
 
         frame_index += 1;
         on_progress(frame_index);
