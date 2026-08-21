@@ -107,6 +107,18 @@ pub struct Rect {
 impl Rect {
     /// El frame completo, sin zoom aplicado.
     pub const FULL_FRAME: Rect = Rect { x: 0.0, y: 0.0, w: 1.0, h: 1.0 };
+
+    /// Clampea el rect para que quede completamente dentro de [0,1]x[0,1]:
+    /// primero acota w/h a como mucho 1.0, despues desliza x/y para que
+    /// x+w <= 1.0 y y+h <= 1.0 sin cambiar el tamanio ya clampeado.
+    #[must_use]
+    pub fn clamp_into_unit_square(self) -> Rect {
+        let w = self.w.clamp(0.0, 1.0);
+        let h = self.h.clamp(0.0, 1.0);
+        let x = self.x.clamp(0.0, 1.0 - w);
+        let y = self.y.clamp(0.0, 1.0 - h);
+        Rect { x, y, w, h }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,5 +285,35 @@ mod tests {
     fn load_missing_file_returns_io_error() {
         let err = Project::load("this/path/does/not/exist.szproj").unwrap_err();
         assert!(matches!(err, ProjectError::Io(_)));
+    }
+
+    #[test]
+    fn clamp_into_unit_square_leaves_a_rect_already_inside_untouched() {
+        let r = Rect { x: 0.2, y: 0.3, w: 0.4, h: 0.5 };
+        assert_eq!(r.clamp_into_unit_square(), r);
+    }
+
+    #[test]
+    fn clamp_into_unit_square_slides_a_rect_that_overflows_the_right_edge() {
+        let r = Rect { x: 0.8, y: 0.1, w: 0.5, h: 0.2 };
+        let clamped = r.clamp_into_unit_square();
+        assert_eq!(clamped.w, 0.5);
+        assert!((clamped.x - 0.5).abs() < 1e-6, "x debe deslizarse a 1.0 - w = 0.5, fue {}", clamped.x);
+    }
+
+    #[test]
+    fn clamp_into_unit_square_shrinks_a_rect_wider_than_the_frame() {
+        let r = Rect { x: 0.5, y: 0.0, w: 1.5, h: 0.3 };
+        let clamped = r.clamp_into_unit_square();
+        assert_eq!(clamped.w, 1.0);
+        assert_eq!(clamped.x, 0.0);
+    }
+
+    #[test]
+    fn clamp_into_unit_square_clamps_negative_origin_to_zero() {
+        let r = Rect { x: -0.3, y: -0.1, w: 0.2, h: 0.2 };
+        let clamped = r.clamp_into_unit_square();
+        assert_eq!(clamped.x, 0.0);
+        assert_eq!(clamped.y, 0.0);
     }
 }
