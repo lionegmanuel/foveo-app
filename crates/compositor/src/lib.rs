@@ -9,7 +9,9 @@
 pub mod camera_path;
 pub mod decode;
 pub mod render;
+pub mod style_pass;
 
 pub use camera_path::camera_rect_at;
 pub use decode::{DecodeError, RawFrameReader};
 pub use render::{Compositor, CompositorError, PIXEL_FORMAT};
+pub use style_pass::{StyledFrame, apply_style};
