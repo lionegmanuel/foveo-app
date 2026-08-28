@@ -6,14 +6,19 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use capture::{RecordingHandle as _, ScreenCapturer, WindowsScreenCapturer};
+use capture::{CaptureSource, RecordingHandle as _, ScreenCapturer, WindowsScreenCapturer};
 use input_tracker::{InputRecordingHandle as _, InputSource, RdevInputSource};
-use project::{InputLog, Project, RawTake, Resolution};
+use project::{CursorPathPoint, InputLog, Project, RawTake, Resolution};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 use zoom_engine::{InputEvent, InputEventKind};
 
 use crate::state::{AppState, RecordingSession};
+
+/// Cada cuanto se guarda una muestra de cursor en el `.szproj`, como mucho
+/// (ver `build_cursor_path`). 30Hz alcanza para una reconstruccion suave y
+/// mantiene el `.szproj` chico incluso en grabaciones largas.
+const CURSOR_SAMPLE_INTERVAL_MS: u64 = 33;
 
 #[derive(Debug, Serialize)]
 pub struct MonitorDto {
@@ -21,6 +26,12 @@ pub struct MonitorDto {
     pub name: String,
     pub width: u32,
     pub height: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WindowDto {
+    pub index: usize,
+    pub title: String,
 }
 
 #[tauri::command]
@@ -31,6 +42,13 @@ pub fn list_monitors() -> Result<Vec<MonitorDto>, String> {
         .into_iter()
         .map(|m| MonitorDto { index: m.index, name: m.name, width: m.width, height: m.height })
         .collect())
+}
+
+#[tauri::command]
+pub fn list_windows() -> Result<Vec<WindowDto>, String> {
+    let capturer = WindowsScreenCapturer;
+    let windows = capturer.list_windows().map_err(|e| e.to_string())?;
+    Ok(windows.into_iter().map(|w| WindowDto { index: w.index, title: w.title }).collect())
 }
 
 fn takes_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -48,6 +66,7 @@ pub fn start_recording(
     app: AppHandle,
     state: State<'_, AppState>,
     monitor_index: Option<usize>,
+    window_index: Option<usize>,
 ) -> Result<(), String> {
     let mut guard = state.recording.lock().map_err(|_| "estado de grabacion envenenado".to_string())?;
     if guard.is_some() {
@@ -59,8 +78,15 @@ pub fn start_recording(
     let raw_take_path = dir.join(format!("take_{stamp}.mp4"));
     let input_log_path = dir.join(format!("take_{stamp}.input.jsonl"));
 
-    let capture_handle =
-        WindowsScreenCapturer.start_recording(&raw_take_path, monitor_index).map_err(|e| e.to_string())?;
+    // `window_index` gana si esta presente (seleccionar una ventana especifica
+    // en la UI desactiva el selector de monitor); ver CaptureSource.
+    let source = match (window_index, monitor_index) {
+        (Some(w), _) => CaptureSource::Window(w),
+        (None, Some(m)) => CaptureSource::Monitor(m),
+        (None, None) => CaptureSource::PrimaryMonitor,
+    };
+
+    let capture_handle = WindowsScreenCapturer.start_recording(&raw_take_path, source).map_err(|e| e.to_string())?;
     let input_handle = RdevInputSource.start_logging(&input_log_path).map_err(|e| e.to_string())?;
 
     *guard = Some(RecordingSession { capture_handle, input_handle, raw_take_path, input_log_path });
@@ -111,6 +137,35 @@ fn parse_input_log(
     Ok(events)
 }
 
+/// Downsamplea los `InputEvent::Move` a lo sumo cada `CURSOR_SAMPLE_INTERVAL_MS`
+/// para la reconstruccion de cursor suavizado (`project::CursorPathPoint`,
+/// consumido por `compositor::cursor_path`). Los clicks (`ButtonPress`/
+/// `ButtonRelease`) siempre se conservan sin importar el intervalo, para que
+/// el efecto de click quede timesteado con precision.
+fn build_cursor_path(events: &[InputEvent]) -> Vec<CursorPathPoint> {
+    let mut path = Vec::new();
+    let mut pressed = false;
+    let mut last_kept_t_ms: Option<u64> = None;
+
+    for event in events {
+        match event.kind {
+            InputEventKind::ButtonPress => pressed = true,
+            InputEventKind::ButtonRelease => pressed = false,
+            InputEventKind::Move => {}
+        }
+
+        let is_click = matches!(event.kind, InputEventKind::ButtonPress | InputEventKind::ButtonRelease);
+        let due = last_kept_t_ms.is_none_or(|t| event.t_ms.saturating_sub(t) >= CURSOR_SAMPLE_INTERVAL_MS);
+
+        if is_click || due {
+            path.push(CursorPathPoint { t_ms: event.t_ms, x: event.x, y: event.y, pressed });
+            last_kept_t_ms = Some(event.t_ms);
+        }
+    }
+
+    path
+}
+
 #[tauri::command]
 pub fn stop_recording(state: State<'_, AppState>) -> Result<String, String> {
     let session = {
@@ -133,6 +188,7 @@ pub fn stop_recording(state: State<'_, AppState>) -> Result<String, String> {
         raw_take_info.height,
     )?;
     let zoom_keyframes = zoom_engine::generate_keyframes(&events, duration_ms);
+    let cursor_path = build_cursor_path(&events);
 
     let mut project = Project::new(
         RawTake {
@@ -144,6 +200,7 @@ pub fn stop_recording(state: State<'_, AppState>) -> Result<String, String> {
         InputLog { path: input_log_path },
     );
     project.zoom_keyframes = zoom_keyframes;
+    project.cursor_path = cursor_path;
 
     let project_path = raw_take_path.with_extension("szproj");
     project.save(&project_path).map_err(|e| e.to_string())?;
@@ -197,5 +254,29 @@ mod tests {
         assert_eq!(events[0].y, 0.0);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn build_cursor_path_downsamples_moves_but_keeps_every_click() {
+        let events = vec![
+            InputEvent { t_ms: 0, x: 0.0, y: 0.0, kind: InputEventKind::Move },
+            InputEvent { t_ms: 10, x: 0.1, y: 0.1, kind: InputEventKind::Move }, // descartado: <33ms del anterior
+            InputEvent { t_ms: 20, x: 0.2, y: 0.2, kind: InputEventKind::ButtonPress }, // click: siempre se guarda
+            InputEvent { t_ms: 25, x: 0.25, y: 0.25, kind: InputEventKind::ButtonRelease }, // click: siempre se guarda
+            InputEvent { t_ms: 50, x: 0.5, y: 0.5, kind: InputEventKind::Move }, // >=33ms del ultimo guardado (25)
+        ];
+
+        let path = build_cursor_path(&events);
+
+        assert_eq!(path.len(), 4, "deberia descartar solo el move de t=10");
+        assert_eq!(path[0], CursorPathPoint { t_ms: 0, x: 0.0, y: 0.0, pressed: false });
+        assert_eq!(path[1], CursorPathPoint { t_ms: 20, x: 0.2, y: 0.2, pressed: true });
+        assert_eq!(path[2], CursorPathPoint { t_ms: 25, x: 0.25, y: 0.25, pressed: false });
+        assert_eq!(path[3], CursorPathPoint { t_ms: 50, x: 0.5, y: 0.5, pressed: false });
+    }
+
+    #[test]
+    fn build_cursor_path_handles_no_events() {
+        assert!(build_cursor_path(&[]).is_empty());
     }
 }

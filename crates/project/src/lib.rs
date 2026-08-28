@@ -20,6 +20,11 @@ pub struct Project {
     pub input_log: InputLog,
     #[serde(default)]
     pub zoom_keyframes: Vec<ZoomKeyframe>,
+    /// Trayectoria de mouse (downsampled) para la reconstruccion de cursor
+    /// suavizado (Fase 3, ver ARQUITECTURA.md 3.1). Vacio en proyectos viejos
+    /// (`#[serde(default)]`) o si no hubo ningun movimiento de mouse.
+    #[serde(default)]
+    pub cursor_path: Vec<CursorPathPoint>,
     #[serde(default)]
     pub style: Style,
     #[serde(default)]
@@ -37,6 +42,7 @@ impl Project {
             raw_take,
             input_log,
             zoom_keyframes: Vec::new(),
+            cursor_path: Vec::new(),
             style: Style::default(),
             export_settings: ExportSettings::default(),
         }
@@ -119,6 +125,19 @@ impl Rect {
         let y = self.y.clamp(0.0, 1.0 - h);
         Rect { x, y, w, h }
     }
+}
+
+/// Una muestra de la posicion del mouse en un instante, para reconstruir el
+/// cursor suavizado en el render (`crates/compositor::cursor_path`). `t_ms`
+/// es relativo al inicio de la grabacion (mismo eje que `ZoomKeyframe`);
+/// `x`/`y` normalizados 0..1 (mismo eje que `Rect`); `pressed` indica si hay
+/// un boton del mouse apretado en ese instante (para el efecto de click).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CursorPathPoint {
+    pub t_ms: u64,
+    pub x: f32,
+    pub y: f32,
+    pub pressed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -217,6 +236,7 @@ mod tests {
                 easing: Easing::EaseInOutCubic,
                 source: KeyframeSource::Auto,
             }],
+            cursor_path: vec![CursorPathPoint { t_ms: 0, x: 0.5, y: 0.5, pressed: false }],
             style: Style::default(),
             export_settings: ExportSettings::default(),
         }
@@ -264,6 +284,7 @@ mod tests {
         });
         let project: Project = serde_json::from_value(minimal).unwrap();
         assert!(project.zoom_keyframes.is_empty());
+        assert!(project.cursor_path.is_empty());
         assert_eq!(project.export_settings.resolution, ExportResolution::P1080);
     }
 

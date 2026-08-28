@@ -5,6 +5,7 @@ import {
   exportProject,
   getProject,
   listMonitors,
+  listWindows,
   renderPreviewFrame,
   startRecording,
   stopRecording,
@@ -14,6 +15,7 @@ import {
   type MonitorInfo,
   type Project,
   type Rect,
+  type WindowInfo,
   type ZoomKeyframe,
 } from "./lib/commands";
 import { TimelineOverlay } from "./components/TimelineOverlay";
@@ -34,6 +36,9 @@ const PREVIEW_DEBOUNCE_MS = 100;
 function App() {
   const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
   const [selectedMonitor, setSelectedMonitor] = useState<number | undefined>(undefined);
+  const [windows, setWindows] = useState<WindowInfo[]>([]);
+  const [sourceKind, setSourceKind] = useState<"monitor" | "window">("monitor");
+  const [selectedWindow, setSelectedWindow] = useState<number | undefined>(undefined);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
 
   const [project, setProject] = useState<Project | null>(null);
@@ -50,6 +55,21 @@ function App() {
       })
       .catch((err: unknown) => setStatus({ kind: "error", message: String(err) }));
   }, []);
+
+  // Las ventanas abiertas cambian mas seguido que los monitores: se
+  // re-listan cada vez que el usuario elige capturar una ventana especifica,
+  // no solo una vez al montar.
+  useEffect(() => {
+    if (sourceKind !== "window") {
+      return;
+    }
+    listWindows()
+      .then((list) => {
+        setWindows(list);
+        setSelectedWindow((current) => current ?? list[0]?.index);
+      })
+      .catch((err: unknown) => setStatus({ kind: "error", message: String(err) }));
+  }, [sourceKind]);
 
   useEffect(() => {
     const unlistenProgress = listen<{ frames_done: number }>("export-progress", (event) => {
@@ -111,13 +131,15 @@ function App() {
         const projectPath = await stopRecording();
         setStatus({ kind: "stopped", projectPath });
       } else {
-        await startRecording(selectedMonitor);
+        const windowIndex = sourceKind === "window" ? selectedWindow : undefined;
+        const monitorIndex = sourceKind === "monitor" ? selectedMonitor : undefined;
+        await startRecording(monitorIndex, windowIndex);
         setStatus({ kind: "recording" });
       }
     } catch (err) {
       setStatus({ kind: "error", message: String(err) });
     }
-  }, [status.kind, selectedMonitor]);
+  }, [status.kind, sourceKind, selectedMonitor, selectedWindow]);
 
   const handleExport = useCallback(async () => {
     if (status.kind !== "stopped") {
@@ -196,21 +218,55 @@ function App() {
     <main className="flex min-h-screen flex-col items-center gap-6 bg-neutral-950 p-8 text-neutral-100">
       <h1 className="text-xl font-semibold">screenzoom</h1>
 
-      <label className="flex flex-col gap-1 text-sm text-neutral-400">
-        Monitor
-        <select
-          className="rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-neutral-100"
-          value={selectedMonitor ?? ""}
-          onChange={(event) => setSelectedMonitor(Number(event.target.value))}
-          disabled={isRecording || monitors.length === 0}
-        >
-          {monitors.map((monitor) => (
-            <option key={monitor.index} value={monitor.index}>
-              {monitor.name} ({monitor.width}x{monitor.height})
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="flex flex-col gap-1 text-sm text-neutral-400">
+        Fuente
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className={`rounded px-3 py-2 ${sourceKind === "monitor" ? "bg-neutral-700 text-white" : "bg-neutral-900 text-neutral-400"}`}
+            onClick={() => setSourceKind("monitor")}
+            disabled={isRecording}
+          >
+            Pantalla completa
+          </button>
+          <button
+            type="button"
+            className={`rounded px-3 py-2 ${sourceKind === "window" ? "bg-neutral-700 text-white" : "bg-neutral-900 text-neutral-400"}`}
+            onClick={() => setSourceKind("window")}
+            disabled={isRecording}
+          >
+            Una ventana
+          </button>
+        </div>
+
+        {sourceKind === "monitor" ? (
+          <select
+            className="rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-neutral-100"
+            value={selectedMonitor ?? ""}
+            onChange={(event) => setSelectedMonitor(Number(event.target.value))}
+            disabled={isRecording || monitors.length === 0}
+          >
+            {monitors.map((monitor) => (
+              <option key={monitor.index} value={monitor.index}>
+                {monitor.name} ({monitor.width}x{monitor.height})
+              </option>
+            ))}
+          </select>
+        ) : (
+          <select
+            className="rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-neutral-100"
+            value={selectedWindow ?? ""}
+            onChange={(event) => setSelectedWindow(Number(event.target.value))}
+            disabled={isRecording || windows.length === 0}
+          >
+            {windows.map((win) => (
+              <option key={win.index} value={win.index}>
+                {win.title}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
 
       <button
         type="button"

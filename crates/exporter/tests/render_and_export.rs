@@ -65,6 +65,7 @@ fn renders_a_short_real_clip_end_to_end() {
             easing: Easing::EaseInOutCubic,
             source: KeyframeSource::Auto,
         }],
+        cursor_path: Vec::new(),
         style: Default::default(),
         export_settings: ExportSettings {
             resolution: project::ExportResolution::P1080,

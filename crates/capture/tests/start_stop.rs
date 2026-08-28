@@ -9,7 +9,7 @@
 use std::thread;
 use std::time::Duration;
 
-use capture::{RecordingHandle, ScreenCapturer, WindowsScreenCapturer};
+use capture::{CaptureSource, RecordingHandle, ScreenCapturer, WindowsScreenCapturer};
 
 #[test]
 #[ignore = "graba la pantalla real; correr a mano con --ignored"]
@@ -19,7 +19,8 @@ fn start_then_stop_produces_a_playable_take() {
     let output_path = dir.join("take.mp4");
 
     let capturer = WindowsScreenCapturer;
-    let handle = capturer.start_recording(&output_path, None).expect("start_recording fallo");
+    let handle =
+        capturer.start_recording(&output_path, CaptureSource::PrimaryMonitor).expect("start_recording fallo");
 
     thread::sleep(Duration::from_secs(2));
 
@@ -50,5 +51,20 @@ fn list_monitors_returns_at_least_one_real_monitor() {
     for m in &monitors {
         assert!(m.index >= 1);
         assert!(m.width > 0 && m.height > 0, "geometria invalida para {}: {}x{}", m.name, m.width, m.height);
+    }
+}
+
+#[test]
+fn list_windows_returns_at_least_one_real_window() {
+    // Igual que `list_monitors_returns_at_least_one_real_monitor`: solo
+    // enumera, no graba nada — corre en cada `cargo test` normal. Siempre
+    // deberia haber al menos una ventana visible en un runner con sesion de
+    // escritorio activa (Explorer, la terminal que corre el test, etc).
+    let capturer = WindowsScreenCapturer;
+    let windows = capturer.list_windows().expect("list_windows fallo");
+
+    assert!(!windows.is_empty(), "esta maquina deberia tener al menos una ventana capturable");
+    for w in &windows {
+        assert!(w.index >= 1);
     }
 }

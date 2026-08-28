@@ -7,7 +7,8 @@
 use std::io::Cursor;
 
 use base64::Engine;
-use compositor::{Compositor, RawFrameReader, apply_style, camera_rect_at};
+use compositor::{Compositor, CursorPath, RawFrameReader, apply_style_ex, camera_rect_at};
+use exporter::cursor_marker_at;
 use project::Project;
 
 /// `#[tauri::command]` sobre una funcion sync (no `async fn`) ya corre en el
@@ -37,7 +38,18 @@ pub fn render_preview_frame(project_path: String, t_ms: u64, max_width: u32) -> 
     let mut compositor = Compositor::new(in_width, in_height, out_width, out_height).map_err(|e| e.to_string())?;
     let crop_rect = camera_rect_at(&keyframes, t_ms);
     let composed = compositor.composite_frame(&frame, crop_rect).map_err(|e| e.to_string())?;
-    let styled = apply_style(&composed, out_width, out_height, &project.style);
+
+    // Sin motion blur en el preview (es un solo frame estatico, no hay
+    // "velocidad" entre el frame anterior y este que tenga sentido mostrar);
+    // el cursor si se muestra, para poder editar el zoom viendo donde estaba
+    // el mouse.
+    let cursor = if project.style.cursor_smoothing {
+        let cursor_path = CursorPath::build(&project.cursor_path);
+        cursor_marker_at(&cursor_path, t_ms, crop_rect, out_width, out_height, &project.style)
+    } else {
+        None
+    };
+    let styled = apply_style_ex(&composed, out_width, out_height, &project.style, 0.0, cursor);
 
     let mut png_bytes = Vec::new();
     {

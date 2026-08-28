@@ -74,6 +74,7 @@ mod tests {
                 easing: Easing::EaseInOutCubic,
                 source: KeyframeSource::Auto,
             }],
+            cursor_path: Vec::new(),
             style: Style::default(),
             export_settings: ExportSettings::default(),
         }

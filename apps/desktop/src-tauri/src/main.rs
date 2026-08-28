@@ -40,6 +40,7 @@ fn main() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             commands::recording::list_monitors,
+            commands::recording::list_windows,
             commands::recording::start_recording,
             commands::recording::stop_recording,
             commands::export::export_project,

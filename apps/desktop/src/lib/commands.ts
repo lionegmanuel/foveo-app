@@ -11,8 +11,18 @@ export function listMonitors(): Promise<MonitorInfo[]> {
   return invoke("list_monitors");
 }
 
-export function startRecording(monitorIndex: number | undefined): Promise<void> {
-  return invoke("start_recording", { monitorIndex });
+export interface WindowInfo {
+  index: number;
+  title: string;
+}
+
+export function listWindows(): Promise<WindowInfo[]> {
+  return invoke("list_windows");
+}
+
+/** `windowIndex`, si esta presente, gana sobre `monitorIndex` (ver el comando `start_recording`). */
+export function startRecording(monitorIndex: number | undefined, windowIndex: number | undefined): Promise<void> {
+  return invoke("start_recording", { monitorIndex, windowIndex });
 }
 
 /** Devuelve la ruta del `.szproj` generado. */
